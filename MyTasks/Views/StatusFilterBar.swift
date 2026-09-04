@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct StatusFilterBar: View {
     @Binding var selection: TaskStatus
@@ -52,13 +53,10 @@ struct StatusFilterBar: View {
         .buttonStyle(.plain)
         .animation(.easeOut(duration: 0.15), value: isSelected)
         .animation(.easeOut(duration: 0.15), value: isTargeted)
-        .dropDestination(for: String.self) { ids, _ in
-            guard let id = ids.first.flatMap(UUID.init) else { return false }
-            onDrop(id, status)
-            return true
-        } isTargeted: { hovering in
-            targeted = hovering ? status : nil
-        }
+        .onDrop(of: [.text], delegate: MoveDropDelegate(
+            onDrop: { id in onDrop(id, status) },
+            onTargeted: { hovering in targeted = hovering ? status : nil }
+        ))
     }
 }
 

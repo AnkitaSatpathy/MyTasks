@@ -6,14 +6,15 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct TasksView: View {
     @State private var viewModel: TasksViewModel
     @State private var status: TaskStatus = .todo
-    @State private var expanded: UUID?
-    @State private var draftTitle = ""
-    @State private var draftDetails = ""
+    /// Only one row keeps its swipe actions open at a time.
+    @State private var swiped: UUID?
     @State private var newTask: Task?
+    @State private var editedTask: Task?
 
     init(viewModel: TasksViewModel = TasksViewModel()) {
         _viewModel = State(initialValue: viewModel)
@@ -40,16 +41,20 @@ struct TasksView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("My Tasks")
+            .onChange(of: status) { _, _ in swiped = nil }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("New Task", systemImage: "plus") {
-                        collapse()
+                        swiped = nil
                         newTask = Task(status: status)
                     }
                 }
             }
             .sheet(item: $newTask) { task in
                 TaskEditorView(task: task, isNew: true) { viewModel.add($0) }
+            }
+            .sheet(item: $editedTask) { task in
+                TaskEditorView(task: task, isNew: false) { viewModel.update($0) }
             }
         }
     }
@@ -58,100 +63,86 @@ struct TasksView: View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 ForEach(visibleTasks) { task in
-                    TaskCard(
-                        task: task,
-                        isExpanded: expanded == task.id,
-                        title: $draftTitle,
-                        details: $draftDetails,
-                        onExpand: { expand(task) },
-                        onSubmit: { collapse() },
-                        onAdvance: { advance(task) },
-                        onMove: { move(task, to: $0) },
-                        onDelete: { delete(task) }
-                    )
-                    
+                    SwipeActions(
+                        isOpen: swipeBinding(for: task),
+                        leading: task.status.next.map { next in
+                            SwipeAction(title: next.title, systemImage: "arrow.right", tint: next.tint) {
+                                advance(task)
+                            }
+                        },
+                        trailing: SwipeAction(title: "Delete", systemImage: "trash.fill", tint: .red) {
+                            delete(task)
+                        }
+                    ) {
+                        TaskCard(
+                            task: task,
+                            onTap: { edit(task) },
+                            onAdvance: { advance(task) }
+                        )
+                    }
                     .draggable(task.id.uuidString) {
                         TaskCard(task: task).frame(width: 280)
                     }
-                    .dropDestination(for: String.self) { ids, _ in
-                        reorder(ids, above: task)
-                    }
+                    .onDrop(of: [.text], delegate: MoveDropDelegate { id in
+                        reorder(id, above: task)
+                    })
                 }
 
                
                 Color.clear
                     .frame(maxWidth: .infinity, minHeight: 60)
                     .contentShape(.rect)
-                    .dropDestination(for: String.self) { ids, _ in
-                        reorder(ids, above: nil)
-                    }
+                    .onDrop(of: [.text], delegate: MoveDropDelegate { id in
+                        reorder(id, above: nil)
+                    })
             }
             .padding(.horizontal, 16)
         }
-        .scrollDismissesKeyboard(.interactively)
-       
-        .onTapGesture { collapse() }
+        .onTapGesture { swiped = nil }
+        // A scroll puts the open row away, the way Mail does. Only a vertical
+        // drag counts, so this never fights the horizontal swipe itself.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20).onChanged { value in
+                guard swiped != nil,
+                      abs(value.translation.height) > abs(value.translation.width) else { return }
+                swiped = nil
+            }
+        )
     }
 
-    // MARK: - Editing
+    // MARK: - Swiping
 
-    private func expand(_ task: Task) {
-        commitDraft()
-        draftTitle = task.title
-        draftDetails = task.details
-        withAnimation(.snappy(duration: 0.25)) {
-            expanded = task.id
-        }
-    }
-
-    private func collapse() {
-        guard expanded != nil else { return }
-        commitDraft()
-        withAnimation(.snappy(duration: 0.25)) {
-            expanded = nil
-        }
-    }
-
-   
-    private func commitDraft() {
-        guard let id = expanded,
-              var task = viewModel.tasks.first(where: { $0.id == id }) else { return }
-
-        let title = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let details = draftDetails.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !title.isEmpty, title != task.title || details != task.details else { return }
-
-        task.title = title
-        task.details = details
-        viewModel.update(task)
+    /// A row claims the single open slot, which closes whichever row held it.
+    private func swipeBinding(for task: Task) -> Binding<Bool> {
+        Binding(
+            get: { swiped == task.id },
+            set: { isOpen in swiped = isOpen ? task.id : nil }
+        )
     }
 
     // MARK: - Actions
 
     private func advance(_ task: Task) {
         withAnimation(.snappy(duration: 0.25)) {
+            swiped = nil
             viewModel.advance(task)
-        }
-    }
-
-    private func move(_ task: Task, to newStatus: TaskStatus) {
-        commitDraft()
-        withAnimation(.snappy(duration: 0.25)) {
-            expanded = nil
-            viewModel.move(task, to: newStatus)
         }
     }
 
     private func delete(_ task: Task) {
         withAnimation(.snappy(duration: 0.25)) {
-            expanded = nil
+            swiped = nil
             viewModel.delete(task)
         }
     }
 
-    private func reorder(_ ids: [String], above task: Task?) {
-        guard let id = ids.first.flatMap(UUID.init) else { return }
+    /// Tapping a card opens it in the editor sheet.
+    private func edit(_ task: Task) {
+        swiped = nil
+        editedTask = task
+    }
+
+    private func reorder(_ id: UUID, above task: Task?) {
         withAnimation(.snappy(duration: 0.25)) {
             viewModel.drop(id, above: task, in: status)
         }
@@ -177,7 +168,7 @@ struct TasksView: View {
 
 #Preview("Tasks") {
     let tasks = [
-        Task(title: "Design the board layout", details: "Tap a card to edit it in place."),
+        Task(title: "Design the board layout", details: "Tap a card to edit it."),
         Task(title: "Buy groceries", details: "Milk, bread, coffee."),
         Task(title: "Book the dentist"),
         Task(title: "Write the persistence layer", status: .inProgress),
