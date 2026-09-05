@@ -74,10 +74,14 @@ The app separates responsibilities into:
 - UI: drag to move and reorder could be better, if I had not accomodated all 3 states in one screen
 -
 
+## Assumptions 
+
+- Tasks only move forward (To Do → In Progress → Done)
+  
 ## Trade-Offs
 
 - SwiftData over CoreData 
-- Chose third party Firebase over native cloudkit for sync, becuase of cloudkit does not show the status of sync of each task.
+- Chose third party Firebase over native cloudkit for sync, becuase of its simple async remote database API
 
 
 ## Setup
