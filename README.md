@@ -1,3 +1,5 @@
+
+
 # MyTasks
 
 iOS task management application that allows users to organize tasks across a
@@ -11,14 +13,13 @@ Users can create, edit, delete, move, and reorder tasks. The app is designed to 
 - View tasks by status
 - Create new tasks
 - Edit task title and description
-- Delete tasks
-- Move tasks between To Do, In Progress, and Done
+- Swipe left to Delete tasks
+- Swipe right or drag the task to move tasks between To Do to In Progress and In Progress to Done 
 - Reorder tasks using drag and drop
 - Search tasks by title or description
 - Local persistence using SwiftData
 - Offline task creation, editing, moving, reordering, and deletion
 - Remote synchronization using an async service interface
-- Firestore support for remote task storage
 - Sync status indicators for pending, synced, and failed changes
 
 ## Task Data
