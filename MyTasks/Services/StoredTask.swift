@@ -24,6 +24,9 @@ final class StoredTask {
     var updatedAt: Date
     /// Position in the flat board array, so an arrangement survives a relaunch.
     var order: Int
+    /// Survives a relaunch too, so a change queued offline is still shown as
+    /// pending after the app is killed.
+    var syncState: SyncState
 
     init(_ task: Task, order: Int) {
         id = task.id
@@ -32,6 +35,7 @@ final class StoredTask {
         status = task.status
         createdAt = task.createdAt
         updatedAt = task.updatedAt
+        syncState = task.syncState
         self.order = order
     }
 
@@ -43,7 +47,9 @@ final class StoredTask {
             details: details,
             status: status,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            order: order,
+            syncState: syncState
         )
     }
 
@@ -52,6 +58,7 @@ final class StoredTask {
         details = task.details
         status = task.status
         updatedAt = task.updatedAt
+        syncState = task.syncState
         self.order = order
     }
 }

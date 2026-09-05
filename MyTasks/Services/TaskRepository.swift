@@ -11,6 +11,15 @@ import SwiftData
 protocol TaskRepository {
     func load() -> [Task]
     func save(_ tasks: [Task])
+
+    // The outbox: changes queued for the remote service, oldest first.
+    func pendingOperations() -> [PendingOperation]
+    /// Queues a change, collapsing it into one already queued for the same
+    /// task so a burst of edits — or a reorder touching every card — does not
+    /// pile up one request per keystroke.
+    func enqueue(_ operation: PendingOperation)
+    func update(_ operation: PendingOperation)
+    func remove(operationID: UUID)
 }
 
 /// Stores the board in SwiftData, on disk in the app's own container.
@@ -23,14 +32,14 @@ struct SwiftDataTaskRepository: TaskRepository {
     /// duplicate work, so the default view model shares this.
     static let shared = SwiftDataTaskRepository()
 
-    private let context: ModelContext
+    fileprivate let context: ModelContext
 
     init(inMemory: Bool = false) {
         context = ModelContext(Self.makeContainer(inMemory: inMemory))
     }
 
     private static func makeContainer(inMemory: Bool) -> ModelContainer {
-        let schema = Schema([StoredTask.self])
+        let schema = Schema([StoredTask.self, StoredOperation.self])
 
         if !inMemory {
             do {
@@ -93,6 +102,81 @@ struct SwiftDataTaskRepository: TaskRepository {
     }
 }
 
+extension SwiftDataTaskRepository {
+    func pendingOperations() -> [PendingOperation] {
+        let descriptor = FetchDescriptor<StoredOperation>(sortBy: [SortDescriptor(\.queuedAt)])
+        return (try? context.fetch(descriptor))?.compactMap(\.operation) ?? []
+    }
+
+    func enqueue(_ operation: PendingOperation) {
+        do {
+            let rows = try context.fetch(FetchDescriptor<StoredOperation>())
+            if let existing = rows.first(where: { $0.taskID == operation.taskID }) {
+                if let merged = Self.merge(existing.operation, with: operation) {
+                    existing.apply(merged)
+                } else {
+                    // A task created and then deleted offline never existed
+                    // remotely, so there is nothing to tell the service.
+                    context.delete(existing)
+                }
+            } else {
+                context.insert(StoredOperation(operation))
+            }
+            try context.save()
+        } catch {
+            print("Could not queue a change: \(error)")
+        }
+    }
+
+    /// Folds a new change into the one already queued for that task.
+    /// Returning `nil` means the pair cancels out.
+    private static func merge(
+        _ existing: PendingOperation?,
+        with new: PendingOperation
+    ) -> PendingOperation? {
+        guard let existing else { return new }
+
+        switch (existing.kind, new.kind) {
+        case (.create, .delete):
+            return nil
+        case (.create, _):
+            // Still a create as far as the service is concerned, newest body.
+            var merged = existing
+            merged.task = new.task
+            merged.attempts = 0
+            merged.lastError = nil
+            return merged
+        default:
+            var merged = new
+            merged.attempts = 0
+            merged.lastError = nil
+            return merged
+        }
+    }
+
+    func update(_ operation: PendingOperation) {
+        do {
+            let rows = try context.fetch(FetchDescriptor<StoredOperation>())
+            guard let row = rows.first(where: { $0.id == operation.id }) else { return }
+            row.apply(operation)
+            try context.save()
+        } catch {
+            print("Could not update a queued change: \(error)")
+        }
+    }
+
+    func remove(operationID: UUID) {
+        do {
+            let rows = try context.fetch(FetchDescriptor<StoredOperation>())
+            guard let row = rows.first(where: { $0.id == operationID }) else { return }
+            context.delete(row)
+            try context.save()
+        } catch {
+            print("Could not clear a queued change: \(error)")
+        }
+    }
+}
+
 /// Reads the `tasks.json` file earlier versions wrote, once, so a board built
 /// before SwiftData is not lost. After that the flag keeps it out of the way —
 /// without it, emptying the board would refill it on the next launch.
@@ -125,4 +209,31 @@ final class InMemoryTaskRepository: TaskRepository {
     func load() -> [Task] { tasks }
 
     func save(_ tasks: [Task]) { self.tasks = tasks }
+
+    private var queue: [PendingOperation] = []
+
+    func pendingOperations() -> [PendingOperation] { queue }
+
+    func enqueue(_ operation: PendingOperation) {
+        if let index = queue.firstIndex(where: { $0.taskID == operation.taskID }) {
+            if operation.kind == .delete, queue[index].kind == .create {
+                queue.remove(at: index)
+            } else if queue[index].kind == .create {
+                queue[index].task = operation.task
+            } else {
+                queue[index] = operation
+            }
+        } else {
+            queue.append(operation)
+        }
+    }
+
+    func update(_ operation: PendingOperation) {
+        guard let index = queue.firstIndex(where: { $0.id == operation.id }) else { return }
+        queue[index] = operation
+    }
+
+    func remove(operationID: UUID) {
+        queue.removeAll { $0.id == operationID }
+    }
 }

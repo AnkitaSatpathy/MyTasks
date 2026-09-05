@@ -17,9 +17,14 @@ struct TaskCard: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(task.title)
-                    .strikethrough(task.status == .done, color: .secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 6) {
+                    Text(task.title)
+                        .strikethrough(task.status == .done, color: .secondary)
+
+                    syncBadge
+
+                    Spacer(minLength: 0)
+                }
 
                 if !task.details.isEmpty {
                     Text(task.details)
@@ -51,6 +56,26 @@ struct TaskCard: View {
         // The whole card opens the editor, apart from the arrow button.
         .contentShape(.rect)
         .onTapGesture { onTap?() }
+    }
+
+    /// Only shown when there is something to say: a task that has reached the
+    /// service needs no decoration.
+    @ViewBuilder
+    private var syncBadge: some View {
+        switch task.syncState {
+        case .synced:
+            EmptyView()
+        case .pending:
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Waiting to sync")
+        case .failed:
+            Image(systemName: "exclamationmark.icloud.fill")
+                .font(.caption2)
+                .foregroundStyle(.red)
+                .accessibilityLabel("Could not sync")
+        }
     }
 }
 

@@ -7,6 +7,9 @@
 
 import SwiftUI
 
+/// `Task` is this app's model, so the concurrency one needs its full name.
+private typealias Job = _Concurrency.Task
+
 /// One side of a swipe: the button that appears behind the row.
 struct SwipeAction {
     let title: String
@@ -93,6 +96,15 @@ struct SwipeActions<Content: View>: View {
             }
         }
         .gesture(swipe)
+        // A row's slid-open position must never outlive the task it belonged
+        // to: filtered lists come and go, and stale offsets would otherwise
+        // show up as an empty coloured row under a different task.
+        .onAppear {
+            guard !isOpen else { return }
+            offset = 0
+            openSide = nil
+            isFiring = false
+        }
         .onChange(of: isOpen) { _, open in
             // The list closed us because another row opened. Settling without
             // writing back, so this does not clear the row that just opened.
@@ -193,14 +205,35 @@ struct SwipeActions<Content: View>: View {
 
     private func close() { open(nil) }
 
-    /// Slides the row out the way it was swiped before the action removes it.
+    /// Slides the row out the way it was swiped, then runs the action.
+    ///
+    /// The action deliberately does not hang off the animation's completion:
+    /// an animation interrupted by anything else on screen would swallow it,
+    /// leaving the row slid open with the change never made.
     private func fire(_ action: SwipeAction, towards side: Side) {
+        guard !isFiring else { return }
         isFiring = true
+
         let distance = max(width, 1) + buttonWidth
-        withAnimation(.snappy(duration: 0.2), completionCriteria: .logicallyComplete) {
+        withAnimation(.snappy(duration: 0.2)) {
             offset = side == .leading ? distance : -distance
-        } completion: {
+        }
+
+        Job {
+            try? await Job<Never, Never>.sleep(for: .milliseconds(200))
             action.perform()
+
+            // The row usually leaves the list here, but a move only sends it to
+            // another one — and the board may well be showing that list now. It
+            // must not arrive still slid open, so the swipe is wound back with
+            // the animation suppressed.
+            var settled = Transaction()
+            settled.disablesAnimations = true
+            withTransaction(settled) {
+                offset = 0
+                openSide = nil
+                isFiring = false
+            }
         }
     }
 }

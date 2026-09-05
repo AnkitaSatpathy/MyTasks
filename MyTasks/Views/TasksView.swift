@@ -9,6 +9,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct TasksView: View {
+    /// Owned by the app, not built here: `init` runs on every body pass, so
+    /// creating one here would spin up a sync engine per redraw.
     @State private var viewModel: TasksViewModel
     @State private var status: TaskStatus = .todo
     /// Only one row keeps its swipe actions open at a time.
@@ -16,7 +18,7 @@ struct TasksView: View {
     @State private var newTask: Task?
     @State private var editedTask: Task?
 
-    init(viewModel: TasksViewModel = TasksViewModel()) {
+    init(viewModel: TasksViewModel) {
         _viewModel = State(initialValue: viewModel)
     }
 
@@ -33,15 +35,24 @@ struct TasksView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
 
-                if visibleTasks.isEmpty {
-                    emptyState.frame(maxHeight: .infinity)
-                } else {
-                    cards
+                Group {
+                    if visibleTasks.isEmpty {
+                        emptyState.frame(maxHeight: .infinity)
+                    } else {
+                        cards
+                    }
+                }
+                // Floats over the list rather than sitting in the stack, so a
+                // message never shifts the cards around as it comes and goes.
+                .overlay(alignment: .top) {
+                    SyncToast(notice: viewModel.syncNotice)
+                    .padding(.horizontal, 16)
                 }
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("My Tasks")
             .onChange(of: status) { _, _ in swiped = nil }
+            .task { viewModel.start() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("New Task", systemImage: "plus") {
@@ -80,6 +91,9 @@ struct TasksView: View {
                             onAdvance: { advance(task) }
                         )
                     }
+                    // Ties the row's swipe state to the task itself, so it is
+                    // never handed on to whatever task takes its place.
+                    .id(task.id)
                     .draggable(task.id.uuidString) {
                         TaskCard(task: task).frame(width: 280)
                     }
@@ -99,6 +113,7 @@ struct TasksView: View {
             .padding(.horizontal, 16)
         }
         .onTapGesture { swiped = nil }
+        .refreshable { await viewModel.refresh() }
         // A scroll puts the open row away, the way Mail does. Only a vertical
         // drag counts, so this never fights the horizontal swipe itself.
         .simultaneousGesture(
@@ -122,10 +137,15 @@ struct TasksView: View {
 
     // MARK: - Actions
 
+    /// Moving a task on also moves the board on, so the card stays in view
+    /// instead of disappearing into a list the user is not looking at.
     private func advance(_ task: Task) {
+        let destination = task.status.next
+
         withAnimation(.snappy(duration: 0.25)) {
             swiped = nil
             viewModel.advance(task)
+            if let destination { status = destination }
         }
     }
 
