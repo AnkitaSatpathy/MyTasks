@@ -85,6 +85,15 @@ final class SyncEngine {
         guard !hasStarted else { return }
         hasStarted = true
 
+        // The worst failure of the lot: the board is usable but nothing will
+        // outlive the app, so say so before anything else.
+        if repository.isEphemeral {
+            post("Storage unavailable — changes won't be saved",
+                 "exclamationmark.triangle.fill",
+                 .failure)
+            return
+        }
+
         guard remote.isConfigured else {
             post("Saved on this device", "internaldrive", .neutral)
             return

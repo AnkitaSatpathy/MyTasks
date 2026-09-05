@@ -19,10 +19,17 @@ final class TasksViewModel {
     /// actually changed and queue only that.
     private var lastPersisted: [UUID: Task] = [:]
 
-    init(
-        repository: TaskRepository = SwiftDataTaskRepository.shared,
-        remote: RemoteTaskService = FirebaseRemote.service()
-    ) {
+    /// The board the app runs on: the store on disk and whatever service is
+    /// configured. A factory rather than default arguments, because those are
+    /// evaluated outside the main actor and cannot reach either of them.
+    static func live() -> TasksViewModel {
+        TasksViewModel(
+            repository: SwiftDataTaskRepository.shared,
+            remote: FirebaseRemote.service()
+        )
+    }
+
+    init(repository: TaskRepository, remote: RemoteTaskService) {
         self.repository = repository
         sync = SyncEngine(repository: repository, remote: remote)
         tasks = repository.load()
@@ -31,7 +38,22 @@ final class TasksViewModel {
     }
 
     /// Called when the board appears. Idempotent.
-    func start() { sync.start() }
+    func start() {
+        queueUnsentWork()
+        sync.start()
+    }
+
+    /// Work the store still has as unsent with nothing queued against it —
+    /// a board carried over from an older version, or edits made before a
+    /// service was configured. Without this it would sit here for good.
+    private func queueUnsentWork() {
+        guard sync.isRemoteConfigured else { return }
+
+        let queued = Set(repository.pendingOperations().map(\.taskID))
+        for task in tasks where task.syncState != .synced && !queued.contains(task.id) {
+            sync.enqueue(PendingOperation(kind: .create, task: task, taskID: task.id))
+        }
+    }
 
     var isEmpty: Bool { tasks.isEmpty }
 
@@ -62,9 +84,17 @@ final class TasksViewModel {
 
     func update(_ task: Task) {
         guard let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+
+        let previousStatus = tasks[index].status
         tasks[index] = task
         tasks[index].updatedAt = Date()
         persist()
+
+        // Editing the status in the sheet is a move: the task belongs at the
+        // bottom of the list it has just joined, not wherever it used to sit.
+        if previousStatus != task.status {
+            drop(task.id, above: nil, in: task.status)
+        }
     }
 
     func delete(_ task: Task) {
@@ -184,12 +214,14 @@ extension TasksViewModel: SyncEngineDelegate {
         var merged: [Task] = []
 
         for task in tasks {
-            if unsent.contains(task.id) {
-                merged.append(task)                       // ours, not yet sent
+            if unsent.contains(task.id) || task.syncState != .synced {
+                // Ours. The service has never acknowledged this one, so its
+                // absence from the fetch says nothing about it.
+                merged.append(task)
             } else if let fresh = remoteByID[task.id] {
                 merged.append(fresh)                      // theirs, we agree
             }
-            // Otherwise it was deleted elsewhere, so it goes.
+            // Only a task the service once had can be treated as deleted there.
         }
 
         let known = Set(merged.map(\.id))

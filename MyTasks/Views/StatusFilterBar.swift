@@ -39,7 +39,7 @@ struct StatusFilterBar: View {
                     .opacity(isSelected ? 0.8 : 0.6)
             }
             .font(.subheadline.weight(.medium))
-            .foregroundStyle(isSelected ? .white : Color.primary)
+            .foregroundStyle(Color.primary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
             .background(isSelected ? status.tint : Color.primary.opacity(0.06), in: .capsule)

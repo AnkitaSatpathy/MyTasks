@@ -49,7 +49,7 @@ struct SyncToast: View {
 
             Text(notice.text)
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(notice.tone == .neutral ? Color.primary : tint(notice.tone))
+                .foregroundStyle(Color.primary)
                 .lineLimit(1)
         }
         .padding(.horizontal, 14)
@@ -65,8 +65,7 @@ struct SyncToast: View {
     private func tint(_ tone: SyncNotice.Tone) -> Color {
         switch tone {
         case .progress, .neutral: .secondary
-        case .success: .green
-        case .failure: .red
+        case .success, .failure: .brand
         }
     }
 }

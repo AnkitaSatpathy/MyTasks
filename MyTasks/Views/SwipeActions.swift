@@ -14,7 +14,14 @@ private typealias Job = _Concurrency.Task
 struct SwipeAction {
     let title: String
     let systemImage: String
+    /// The button itself, at the edge of the row.
     let tint: Color
+    /// The panel revealed behind the sliding card. Defaults to the button's
+    /// own colour; give it a wash instead to let the button stand out on it.
+    var panel: Color?
+    /// What is drawn on the tint. A pale fill needs dark content, a strong one
+    /// needs white, so the caller decides rather than the view guessing.
+    var content: Color = .primary
     let perform: () -> Void
 }
 
@@ -48,15 +55,12 @@ struct SwipeActions<Content: View>: View {
 
     private enum Side { case leading, trailing }
 
-    /// How much of the row a button takes when it is parked open.
     private let buttonWidth: CGFloat = 84
-    /// Lifting off past this share of the row fires without a second tap.
     private let fullSwipeShare: CGFloat = 0.55
     private let corner: CGFloat = 14
 
     @State private var offset: CGFloat = 0
     @State private var offsetAtStart: CGFloat = 0
-    /// Which way the current gesture went first. A vertical one is the scroll's.
     @State private var axis: Axis?
     @State private var openSide: Side?
     @State private var width: CGFloat = 0
@@ -67,7 +71,6 @@ struct SwipeActions<Content: View>: View {
 
     var body: some View {
         ZStack {
-            // Sit under the card, so they are revealed rather than animated in.
             if let leading {
                 button(for: leading, on: .leading)
                     .opacity(offset > 0 ? 1 : 0)
@@ -77,8 +80,6 @@ struct SwipeActions<Content: View>: View {
 
             content
                 .offset(x: offset)
-                // While open, a tap anywhere on the row closes it instead of
-                // reaching the card underneath.
                 .overlay {
                     if openSide != nil {
                         Color.clear
@@ -96,9 +97,7 @@ struct SwipeActions<Content: View>: View {
             }
         }
         .gesture(swipe)
-        // A row's slid-open position must never outlive the task it belonged
-        // to: filtered lists come and go, and stale offsets would otherwise
-        // show up as an empty coloured row under a different task.
+    
         .onAppear {
             guard !isOpen else { return }
             offset = 0
@@ -106,8 +105,6 @@ struct SwipeActions<Content: View>: View {
             isFiring = false
         }
         .onChange(of: isOpen) { _, open in
-            // The list closed us because another row opened. Settling without
-            // writing back, so this does not clear the row that just opened.
             guard !open, !isFiring, openSide != nil else { return }
             settle(to: nil)
         }
@@ -121,7 +118,7 @@ struct SwipeActions<Content: View>: View {
 
     private func button(for action: SwipeAction, on side: Side) -> some View {
         RoundedRectangle(cornerRadius: corner, style: .continuous)
-            .fill(action.tint)
+            .fill(action.panel ?? action.tint)
             .overlay(alignment: side == .leading ? .leading : .trailing) {
                 Button { fire(action, towards: side) } label: {
                     VStack(spacing: 3) {
@@ -132,9 +129,10 @@ struct SwipeActions<Content: View>: View {
                             .lineLimit(2)
                             .multilineTextAlignment(.center)
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(action.content)
                     .frame(width: buttonWidth)
                     .frame(maxHeight: .infinity)
+                    .background(action.tint, in: .rect(cornerRadius: corner, style: .continuous))
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
@@ -152,7 +150,6 @@ struct SwipeActions<Content: View>: View {
                 guard axis == .horizontal else { return }
 
                 let raw = offsetAtStart + value.translation.width
-                // Nothing to reveal on the leading side of a Done card.
                 offset = leading == nil ? min(0, raw) : raw
 
                 let past = abs(offset) > fullSwipeDistance
@@ -174,7 +171,6 @@ struct SwipeActions<Content: View>: View {
                 if abs(offset) > fullSwipeDistance {
                     fire(action, towards: side)
                 } else {
-                    // Where the flick was heading, not just where it stopped.
                     let projected = offsetAtStart + value.predictedEndTranslation.width
                     open(abs(projected) > buttonWidth / 2 ? side : nil)
                 }
@@ -205,11 +201,6 @@ struct SwipeActions<Content: View>: View {
 
     private func close() { open(nil) }
 
-    /// Slides the row out the way it was swiped, then runs the action.
-    ///
-    /// The action deliberately does not hang off the animation's completion:
-    /// an animation interrupted by anything else on screen would swallow it,
-    /// leaving the row slid open with the change never made.
     private func fire(_ action: SwipeAction, towards side: Side) {
         guard !isFiring else { return }
         isFiring = true
@@ -222,11 +213,6 @@ struct SwipeActions<Content: View>: View {
         Job {
             try? await Job<Never, Never>.sleep(for: .milliseconds(200))
             action.perform()
-
-            // The row usually leaves the list here, but a move only sends it to
-            // another one — and the board may well be showing that list now. It
-            // must not arrive still slid open, so the swipe is wound back with
-            // the animation suppressed.
             var settled = Transaction()
             settled.disablesAnimations = true
             withTransaction(settled) {
@@ -257,13 +243,13 @@ struct SwipeActions<Content: View>: View {
                                 set: { open = $0 ? task.id : nil }
                             ),
                             leading: task.status.next.map { next in
-                                SwipeAction(title: next.title, systemImage: "arrow.right", tint: next.tint) {
+                                SwipeAction(title: next.title, systemImage: "arrow.right", tint: next.tint, panel: .brandSurface) {
                                     withAnimation(.snappy(duration: 0.25)) {
                                         tasks.removeAll { $0.id == task.id }
                                     }
                                 }
                             },
-                            trailing: SwipeAction(title: "Delete", systemImage: "trash.fill", tint: .red) {
+                            trailing: SwipeAction(title: "Delete", systemImage: "trash.fill", tint: .red, content: .white) {
                                 withAnimation(.snappy(duration: 0.25)) {
                                     tasks.removeAll { $0.id == task.id }
                                 }

@@ -14,12 +14,16 @@ struct MyTasksApp: App {
 
     init() {
         FirebaseRemote.configureIfPossible()
-        _viewModel = State(initialValue: TasksViewModel())
+        _viewModel = State(initialValue: .live())
     }
 
     var body: some Scene {
         WindowGroup {
             TasksView(viewModel: viewModel)
+                // The board is designed around one palette — a sticky-note
+                // yellow on a pale ground — so it stays light whatever the
+                // device is set to.
+                .preferredColorScheme(.light)
         }
     }
 }

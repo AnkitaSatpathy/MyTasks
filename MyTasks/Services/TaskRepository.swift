@@ -11,15 +11,16 @@ import SwiftData
 protocol TaskRepository {
     func load() -> [Task]
     func save(_ tasks: [Task])
-
-    // The outbox: changes queued for the remote service, oldest first.
     func pendingOperations() -> [PendingOperation]
-    /// Queues a change, collapsing it into one already queued for the same
-    /// task so a burst of edits — or a reorder touching every card — does not
-    /// pile up one request per keystroke.
     func enqueue(_ operation: PendingOperation)
     func update(_ operation: PendingOperation)
     func remove(operationID: UUID)
+
+    var isEphemeral: Bool { get }
+}
+
+extension TaskRepository {
+    var isEphemeral: Bool { false }
 }
 
 /// Stores the board in SwiftData, on disk in the app's own container.
@@ -33,27 +34,29 @@ struct SwiftDataTaskRepository: TaskRepository {
     static let shared = SwiftDataTaskRepository()
 
     fileprivate let context: ModelContext
+    let isEphemeral: Bool
 
     init(inMemory: Bool = false) {
-        context = ModelContext(Self.makeContainer(inMemory: inMemory))
+        let (container, onDisk) = Self.makeContainer(inMemory: inMemory)
+        context = ModelContext(container)
+        isEphemeral = !onDisk
     }
 
-    private static func makeContainer(inMemory: Bool) -> ModelContainer {
+    /// Returns the container and whether it is actually backed by the disk.
+    private static func makeContainer(inMemory: Bool) -> (ModelContainer, Bool) {
         let schema = Schema([StoredTask.self, StoredOperation.self])
 
         if !inMemory {
             do {
-                return try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema))
+                return (try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema)), true)
             } catch {
-                // A store that will not open should not take the app down with
-                // it — carry on in memory for this launch instead.
                 print("Could not open the task store, falling back to memory: \(error)")
             }
         }
 
         do {
             let memory = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-            return try ModelContainer(for: schema, configurations: memory)
+            return (try ModelContainer(for: schema, configurations: memory), inMemory)
         } catch {
             fatalError("Could not build the task store: \(error)")
         }
@@ -115,8 +118,6 @@ extension SwiftDataTaskRepository {
                 if let merged = Self.merge(existing.operation, with: operation) {
                     existing.apply(merged)
                 } else {
-                    // A task created and then deleted offline never existed
-                    // remotely, so there is nothing to tell the service.
                     context.delete(existing)
                 }
             } else {
@@ -140,7 +141,6 @@ extension SwiftDataTaskRepository {
         case (.create, .delete):
             return nil
         case (.create, _):
-            // Still a create as far as the service is concerned, newest body.
             var merged = existing
             merged.task = new.task
             merged.attempts = 0

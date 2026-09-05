@@ -16,11 +16,5 @@ extension TaskStatus {
         }
     }
 
-    var tint: Color {
-        switch self {
-        case .todo: .blue
-        case .inProgress: .orange
-        case .done: .green
-        }
-    }
+    var tint: Color { .brand }
 }

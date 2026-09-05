@@ -7,8 +7,6 @@
 
 import SwiftUI
 
-/// A single task: its title, its description and the arrow to the next status.
-/// Tapping it opens the editor sheet; the row's swipe actions handle the rest.
 struct TaskCard: View {
     let task: Task
     var onTap: (() -> Void)?
@@ -41,9 +39,9 @@ struct TaskCard: View {
                 } label: {
                     Image(systemName: "arrow.right")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(next.tint)
+                        .foregroundStyle(.primary)
                         .frame(width: 34, height: 34)
-                        .background(next.tint.opacity(0.12), in: .circle)
+                        .background(.black.opacity(0.07), in: .circle)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Move to \(next.title)")
@@ -51,9 +49,13 @@ struct TaskCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.brandSurface, in: .rect(cornerRadius: 14))
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.black.opacity(0.06), lineWidth: 1)
+        }
         .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
-        // The whole card opens the editor, apart from the arrow button.
         .contentShape(.rect)
         .onTapGesture { onTap?() }
     }
@@ -73,7 +75,7 @@ struct TaskCard: View {
         case .failed:
             Image(systemName: "exclamationmark.icloud.fill")
                 .font(.caption2)
-                .foregroundStyle(.red)
+                .foregroundStyle(Color.brand)
                 .accessibilityLabel("Could not sync")
         }
     }
