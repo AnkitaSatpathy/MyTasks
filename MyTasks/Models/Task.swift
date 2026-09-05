@@ -23,4 +23,15 @@ struct Task: Identifiable, Codable, Equatable {
         self.createdAt = Date()
         self.updatedAt = createdAt
     }
+
+    /// Rebuilds a task that already exists. The store uses this to hand back a
+    /// row with its original id and dates intact.
+    init(id: UUID, title: String, details: String, status: TaskStatus, createdAt: Date, updatedAt: Date) {
+        self.id = id
+        self.title = title
+        self.details = details
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 }

@@ -13,7 +13,7 @@ final class TasksViewModel {
 
     private let repository: TaskRepository
 
-    init(repository: TaskRepository = JSONTaskRepository()) {
+    init(repository: TaskRepository = SwiftDataTaskRepository.shared) {
         self.repository = repository
         tasks = repository.load()
     }
